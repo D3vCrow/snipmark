@@ -1,3 +1,10 @@
+# [1.7.0-beta.1](https://github.com/mrgoonie/winshot/compare/v1.6.0...v1.7.0-beta.1) (2026-03-04)
+
+
+### Features
+
+* qr code scanner implementation ([3d36a07](https://github.com/mrgoonie/winshot/commit/3d36a07285d08c431ecf1678597689a4794f31b6))
+
 # [1.6.0](https://github.com/mrgoonie/winshot/compare/v1.5.0...v1.6.0) (2026-01-25)
 
 
