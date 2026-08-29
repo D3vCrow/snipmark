@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { EditorTool, Annotation } from '../types';
+import { EditorTool, Annotation, MarkKind } from '../types';
 import {
   MousePointer2,
   Square,
@@ -18,6 +18,12 @@ import {
   Redo2,
   Hash,
   ChevronDown,
+  CircleQuestionMark,
+  ChevronsUp,
+  Lock,
+  Move,
+  TriangleAlert,
+  Scissors,
 } from 'lucide-react';
 
 interface AnnotationToolbarProps {
@@ -28,6 +34,7 @@ interface AnnotationToolbarProps {
   cornerRadius: number; // For rectangles
   fontSize: number;
   fontStyle: 'normal' | 'bold' | 'italic' | 'bold italic';
+  activeKind?: MarkKind; // Mark kind on the currently selected annotation
   onToolChange: (tool: EditorTool) => void;
   onColorChange: (color: string | null) => void;
   onFillColorChange: (color: string | null) => void;
@@ -35,6 +42,7 @@ interface AnnotationToolbarProps {
   onCornerRadiusChange: (radius: number) => void;
   onFontSizeChange: (size: number) => void;
   onFontStyleChange: (style: 'normal' | 'bold' | 'italic' | 'bold italic') => void;
+  onKindSelect: (kind: MarkKind) => void;
   onCurvedChange?: (curved: boolean) => void;
   onDeleteSelected: () => void;
   hasSelection: boolean;
@@ -56,6 +64,18 @@ const STROKE_WIDTHS = [2, 4, 6, 8, 10];
 const CORNER_RADII = [0, 4, 8, 12, 20];
 
 const FONT_SIZES = [16, 24, 32, 48, 64, 80, 96];
+
+// Typed verdicts. SIX buttons for SEVEN kinds: 'less' has no button because the
+// census put magnitude at 6.5 to 1 toward more, so it is reached by
+// shift-clicking More rather than spending a seventh of the row on it.
+const MARK_KINDS: { kind: MarkKind; icon: JSX.Element; label: string; shortcut: string; hint: string }[] = [
+  { kind: 'ask',   label: 'Ask',   shortcut: '1', hint: 'what is this / why',       icon: <CircleQuestionMark className="w-5 h-5" /> },
+  { kind: 'more',  label: 'More',  shortcut: '2', hint: 'stronger, bigger, louder', icon: <ChevronsUp className="w-5 h-5" /> },
+  { kind: 'keep',  label: 'Keep',  shortcut: '3', hint: 'do not touch this',        icon: <Lock className="w-5 h-5" /> },
+  { kind: 'move',  label: 'Move',  shortcut: '4', hint: 'put it somewhere else',    icon: <Move className="w-5 h-5" /> },
+  { kind: 'wrong', label: 'Wrong', shortcut: '5', hint: 'broken, or replace it',    icon: <TriangleAlert className="w-5 h-5" /> },
+  { kind: 'cut',   label: 'Cut',   shortcut: '6', hint: 'remove it',                icon: <Scissors className="w-5 h-5" /> },
+];
 
 // Color picker dropdown component - uses Portal to escape overflow:hidden containers
 function ColorPickerDropdown({
@@ -192,6 +212,7 @@ export function AnnotationToolbar({
   cornerRadius,
   fontSize,
   fontStyle,
+  activeKind,
   onToolChange,
   onColorChange,
   onFillColorChange,
@@ -199,6 +220,7 @@ export function AnnotationToolbar({
   onCornerRadiusChange,
   onFontSizeChange,
   onFontStyleChange,
+  onKindSelect,
   onCurvedChange,
   onDeleteSelected,
   hasSelection,
@@ -294,6 +316,28 @@ export function AnnotationToolbar({
             title={`${tool.label} (${tool.shortcut})`}
           >
             {tool.icon}
+          </button>
+        ))}
+      </div>
+
+      {/* Mark Kinds - the typed verdict carried by the selected annotation */}
+      <div className="flex items-center gap-1 px-2 border-r border-white/10">
+        <span className="text-xs text-slate-400 font-medium mr-1">Mark</span>
+        {MARK_KINDS.map((markKind) => (
+          <button
+            key={markKind.kind}
+            onClick={() => onKindSelect(markKind.kind)}
+            disabled={!hasSelection}
+            className={`p-2 rounded-lg transition-all duration-200 ${
+              !hasSelection
+                ? 'text-slate-600 cursor-not-allowed opacity-50'
+                : activeKind === markKind.kind
+                  ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/30'
+                  : 'text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+            title={`${markKind.label} (${markKind.shortcut}) - ${markKind.hint}`}
+          >
+            {markKind.icon}
           </button>
         ))}
       </div>

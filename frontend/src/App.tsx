@@ -13,7 +13,7 @@ import { StatusBar } from './components/status-bar';
 import { AnnotationToolbar } from './components/annotation-toolbar';
 import { ExportToolbar } from './components/export-toolbar';
 import { CropToolbar } from './components/crop-toolbar';
-import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage } from './types';
+import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage, MarkKind } from './types';
 import {
   CaptureFullscreen,
   CaptureWindow,
@@ -902,6 +902,13 @@ function App() {
     }
   }, [selectedAnnotationId, annotations, handleAnnotationUpdate]);
 
+  // Set the typed verdict on the selected annotation
+  const handleKindSelect = useCallback((kind: MarkKind) => {
+    if (selectedAnnotationId) {
+      handleAnnotationUpdate(selectedAnnotationId, { kind });
+    }
+  }, [selectedAnnotationId, handleAnnotationUpdate]);
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedAnnotationId) {
       setAnnotations((prev) => prev.filter((ann) => ann.id !== selectedAnnotationId));
@@ -1594,6 +1601,7 @@ function App() {
             cornerRadius={shapeCornerRadius}
             fontSize={fontSize}
             fontStyle={fontStyle}
+            activeKind={selectedAnnotationId ? annotations.find(a => a.id === selectedAnnotationId)?.kind : undefined}
             onToolChange={handleToolChange}
             onColorChange={handleStrokeColorChange}
             onFillColorChange={handleFillColorChange}
@@ -1601,6 +1609,7 @@ function App() {
             onCornerRadiusChange={handleShapeCornerRadiusChange}
             onFontSizeChange={handleFontSizeChange}
             onFontStyleChange={handleFontStyleChange}
+            onKindSelect={handleKindSelect}
             onCurvedChange={handleCurvedChange}
             onDeleteSelected={handleDeleteSelected}
             hasSelection={!!selectedAnnotationId}
