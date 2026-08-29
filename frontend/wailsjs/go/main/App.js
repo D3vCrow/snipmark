@@ -178,6 +178,10 @@ export function SaveR2Credentials(arg1, arg2) {
   return window['go']['main']['App']['SaveR2Credentials'](arg1, arg2);
 }
 
+export function SaveSidecar(arg1, arg2) {
+  return window['go']['main']['App']['SaveSidecar'](arg1, arg2);
+}
+
 export function SelectFolder() {
   return window['go']['main']['App']['SelectFolder']();
 }

@@ -1051,3 +1051,13 @@ func (a *App) DeleteScreenshot(imagePath string) error {
 
 	return os.Remove(absPath)
 }
+
+// SaveSidecar writes the markdown mark-list beside an exported image.
+// An empty sidecar writes nothing: a screenshot with no marks should not
+// leave an empty .md file next to it.
+func (a *App) SaveSidecar(path string, contents string) error {
+	if contents == "" {
+		return nil
+	}
+	return os.WriteFile(path, []byte(contents), 0644)
+}

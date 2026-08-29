@@ -20,6 +20,7 @@ import {
   CaptureWindow,
   SaveImage,
   QuickSave,
+  SaveSidecar,
   MinimizeToTray,
   PrepareRegionCapture,
   FinishRegionCapture,
@@ -40,6 +41,7 @@ import {
 import { updater } from '../wailsjs/go/models';
 import { EventsOn, EventsOff, WindowGetSize } from '../wailsjs/runtime/runtime';
 import { extractDominantEdgeColor } from './utils/extract-edge-color';
+import { toSidecar } from './lib/sidecar';
 
 // Default editor settings (used before Go config loads)
 const DEFAULT_EDITOR_SETTINGS = {
@@ -1309,6 +1311,28 @@ function App() {
   };
 
   // Export handlers
+
+  // Writes the markdown mark-list beside an image that was just saved, and
+  // never rejects. SaveSidecar is a Go method returning error, so its Wails
+  // binding is a Promise that REJECTS on a failed write. By the time this runs
+  // the PNG is already on disk, and the PNG is the artifact the user asked for:
+  // letting a sidecar failure reach the caller's catch would report "Save
+  // failed" for a save that worked, and hide the path they need. So the failure
+  // is logged and swallowed here rather than propagated.
+  const writeSidecar = useCallback(async (imagePath: string) => {
+    try {
+      const imageName = imagePath.split(/[\\/]/).pop() ?? 'screenshot.png';
+      const sidecar = toSidecar(annotations, imageName);
+      // No kinds and no notes means nothing to say; leave no stray .md behind.
+      if (!sidecar) return;
+      // Swap the extension without crossing a path separator, so a folder with
+      // a dot in its name cannot swallow the filename.
+      await SaveSidecar(imagePath.replace(/\.[^.\\/]+$/, '.md'), sidecar);
+    } catch (error) {
+      console.error('Sidecar write failed:', error);
+    }
+  }, [annotations]);
+
   const handleSave = useCallback(async (format: 'png' | 'jpeg') => {
     const dataUrl = getCanvasDataUrl(format);
     if (!dataUrl) {
@@ -1324,6 +1348,7 @@ function App() {
       const result = await SaveImage(base64Data, format);
 
       if (result.success) {
+        await writeSidecar(result.filePath);
         setStatusMessage(`Saved to ${result.filePath}`);
       } else {
         setStatusMessage(result.error || 'Save failed');
@@ -1335,7 +1360,7 @@ function App() {
 
     setIsExporting(false);
     setTimeout(() => setStatusMessage(undefined), 3000);
-  }, [getCanvasDataUrl]);
+  }, [getCanvasDataUrl, writeSidecar]);
 
   const handleQuickSave = useCallback(async (format: 'png' | 'jpeg') => {
     const dataUrl = getCanvasDataUrl(format);
@@ -1353,6 +1378,7 @@ function App() {
 
       if (result.success) {
         setLastSavedPath(result.filePath);
+        await writeSidecar(result.filePath);
         // Auto-copy path to clipboard after QuickSave (per user validation)
         try {
           await navigator.clipboard.writeText(result.filePath);
@@ -1371,7 +1397,7 @@ function App() {
 
     setIsExporting(false);
     setTimeout(() => setStatusMessage(undefined), 3000);
-  }, [getCanvasDataUrl]);
+  }, [getCanvasDataUrl, writeSidecar]);
 
   // Copy file path to clipboard
   const handleCopyPath = useCallback(async () => {
