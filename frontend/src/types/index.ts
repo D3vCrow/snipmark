@@ -34,6 +34,10 @@ export type AnnotationType = 'rectangle' | 'ellipse' | 'arrow' | 'line' | 'text'
 // question 156, more-or-less 98, keep 59, move 56, wrong 49, cut 24.
 // 'replace' folds into 'wrong' plus the note. Ranking is the finding; the
 // raw counts drift because VERDICTS is append-only.
+//
+// SEVEN values, SIX buttons. 'more' and 'less' are one magnitude control:
+// the census split 6.5 to 1 toward more, so 'more' gets the button and
+// 'less' is reached by shift-clicking it. Do not add a seventh button.
 export type MarkKind = 'ask' | 'more' | 'less' | 'keep' | 'move' | 'wrong' | 'cut';
 
 // Crop types
