@@ -98,10 +98,19 @@ type Config struct {
 	BackgroundImages []string        `json:"backgroundImages,omitempty"`
 }
 
+// DefaultSaveDir is where marked exports land. It matches the folder ShareX
+// already writes captures to, so a raw capture and a marked export sit side
+// by side and both are readable by path from a Claude session.
+//
+// This is the copy that actually decides. app.go has its own defaultSaveDir
+// for the `folder == ""` fallbacks, but Load() persists this value on first
+// run, so those fallbacks never fire on a machine that has launched the app
+// even once. Change both together or the change is inert.
+const DefaultSaveDir = `F:\DevCrow\Dev\.snips`
+
 // Default returns default configuration
 func Default() *Config {
-	homeDir, _ := os.UserHomeDir()
-	defaultFolder := filepath.Join(homeDir, "Pictures", "WinShot")
+	defaultFolder := DefaultSaveDir
 
 	return &Config{
 		Hotkeys: HotkeyConfig{
