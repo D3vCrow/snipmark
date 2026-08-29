@@ -28,6 +28,11 @@ import (
 	winEnum "winshot/internal/windows"
 )
 
+// defaultSaveDir is where marked exports land. It matches the folder ShareX
+// already writes captures to, so a raw capture and a marked export sit side
+// by side and both are readable by path from a Claude session.
+const defaultSaveDir = `F:\DevCrow\Dev\.snips`
+
 // Version is set at build time via ldflags
 var Version = "dev"
 
@@ -506,11 +511,7 @@ func (a *App) QuickSave(imageData string, format string) SaveImageResult {
 	// Get save directory from config (fallback to default)
 	saveDir := a.config.QuickSave.Folder
 	if saveDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return SaveImageResult{Success: false, Error: "Failed to get home directory: " + err.Error()}
-		}
-		saveDir = filepath.Join(homeDir, "Pictures", "WinShot")
+		saveDir = defaultSaveDir
 	}
 
 	// Create save directory if it doesn't exist
@@ -951,11 +952,7 @@ func (a *App) GetLibraryImages() ([]library.LibraryImage, error) {
 	folder := a.config.QuickSave.Folder
 	if folder == "" {
 		// Fallback to default location
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
-		}
-		folder = filepath.Join(homeDir, "Pictures", "WinShot")
+		folder = defaultSaveDir
 	}
 
 	opts := library.DefaultScanOptions()
@@ -968,8 +965,7 @@ func (a *App) OpenInEditor(imagePath string) (*screenshot.CaptureResult, error) 
 	// Validate path is within QuickSave folder (prevent directory traversal)
 	folder := a.config.QuickSave.Folder
 	if folder == "" {
-		homeDir, _ := os.UserHomeDir()
-		folder = filepath.Join(homeDir, "Pictures", "WinShot")
+		folder = defaultSaveDir
 	}
 
 	absPath, err := filepath.Abs(imagePath)
@@ -1030,8 +1026,7 @@ func (a *App) DeleteScreenshot(imagePath string) error {
 	// Validate path is within QuickSave folder (prevent directory traversal)
 	folder := a.config.QuickSave.Folder
 	if folder == "" {
-		homeDir, _ := os.UserHomeDir()
-		folder = filepath.Join(homeDir, "Pictures", "WinShot")
+		folder = defaultSaveDir
 	}
 
 	absPath, err := filepath.Abs(imagePath)
