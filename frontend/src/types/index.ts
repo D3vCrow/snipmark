@@ -29,6 +29,13 @@ export interface EditorState {
 // Annotation types
 export type AnnotationType = 'rectangle' | 'ellipse' | 'arrow' | 'line' | 'text' | 'spotlight' | 'number';
 
+// Mark kinds. Derived from a census of 856 verbatim Chris-quotes across
+// sandbox/three-tables/notes/VERDICTS.md + archive, counted by intent family:
+// question 156, more-or-less 98, keep 59, move 56, wrong 49, cut 24.
+// 'replace' folds into 'wrong' plus the note. Ranking is the finding; the
+// raw counts drift because VERDICTS is append-only.
+export type MarkKind = 'ask' | 'more' | 'less' | 'keep' | 'move' | 'wrong' | 'cut';
+
 // Crop types
 export interface CropArea {
   x: number;
@@ -66,6 +73,10 @@ export interface Annotation {
   dimOpacity?: number; // Opacity of the dimmed area (0-1, default 0.7)
   // For number annotations
   number?: number; // The numeric value displayed in the circle
+  // Typed verdict + free text. Both optional so every existing annotation
+  // stays valid and old saved state keeps loading.
+  kind?: MarkKind;
+  note?: string;
 }
 
 export type EditorTool = 'select' | 'crop' | AnnotationType;
