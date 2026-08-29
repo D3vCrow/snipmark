@@ -11,6 +11,7 @@ import { SettingsModal } from './components/settings-modal';
 import { UpdateModal } from './components/update-modal';
 import { StatusBar } from './components/status-bar';
 import { AnnotationToolbar } from './components/annotation-toolbar';
+import { MarkNoteInput } from './components/mark-note-input';
 import { ExportToolbar } from './components/export-toolbar';
 import { CropToolbar } from './components/crop-toolbar';
 import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage, MarkKind } from './types';
@@ -56,6 +57,28 @@ const DEFAULT_EDITOR_SETTINGS = {
   borderOpacity: 100,
   borderType: 'center' as BorderType,
 };
+
+// Digit keys that stamp a verdict on the selected mark. Six digits for seven
+// kinds: Shift on the 2 key gives 'less', matching the toolbar where 'less' is
+// the shift modifier on More rather than a seventh button.
+const KIND_BY_DIGIT: Record<string, MarkKind> = {
+  '1': 'ask',
+  '2': 'more',
+  '3': 'keep',
+  '4': 'move',
+  '5': 'wrong',
+  '6': 'cut',
+};
+
+// Read the physical digit key, not the character it produced. Shift+2 on a US
+// layout reports e.key '@', so keying off e.key alone would make Shift+2 -> less
+// unreachable. e.code is layout-independent for the digit row; the e.key branch
+// is the numpad, which reports Numpad2 rather than Digit2.
+function digitFromEvent(e: KeyboardEvent): string | null {
+  const fromCode = /^Digit[1-6]$/.exec(e.code);
+  if (fromCode) return e.code.slice(5);
+  return /^[1-6]$/.test(e.key) ? e.key : null;
+}
 
 // Helper to parse ratio string into numeric ratio
 function parseRatio(ratio: OutputRatio): number | null {
@@ -133,6 +156,7 @@ function constrainToAspectRatio(area: CropArea, ratio: CropAspectRatio): CropAre
 
 function App() {
   const stageRef = useRef<Konva.Stage>(null);
+  const noteInputRef = useRef<HTMLInputElement>(null);
   const [screenshot, setScreenshot] = useState<CaptureResult | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [showWindowPicker, setShowWindowPicker] = useState(false);
@@ -909,6 +933,13 @@ function App() {
     }
   }, [selectedAnnotationId, handleAnnotationUpdate]);
 
+  // Set the free-text note on the selected annotation
+  const handleNoteChange = useCallback((note: string) => {
+    if (selectedAnnotationId) {
+      handleAnnotationUpdate(selectedAnnotationId, { note });
+    }
+  }, [selectedAnnotationId, handleAnnotationUpdate]);
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedAnnotationId) {
       setAnnotations((prev) => prev.filter((ann) => ann.id !== selectedAnnotationId));
@@ -1142,6 +1173,30 @@ function App() {
         }
       }
 
+      // Mark kinds 1-6 on the selected mark, Shift+2 for 'less'.
+      // The note field is a plain <input>, so the "skip if typing in an input
+      // field" guard at the top of this handler is what stops "2 shadows" from
+      // silently retagging the mark as 'more' - this handler is on window, so
+      // every digit typed into the note would otherwise also be a shortcut.
+      // Keep that guard above this branch.
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && selectedAnnotationId) {
+        const digit = digitFromEvent(e);
+        if (digit) {
+          handleAnnotationUpdate(selectedAnnotationId, {
+            kind: digit === '2' && e.shiftKey ? 'less' : KIND_BY_DIGIT[digit],
+          });
+          return;
+        }
+        // Enter drops into the note field, so a mark can be drawn, typed and
+        // described without reaching for the mouse. The field blurs itself on
+        // Enter or Escape, which hands these shortcuts back.
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          noteInputRef.current?.focus();
+          return;
+        }
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedAnnotationId) {
           handleDeleteSelected();
@@ -1191,7 +1246,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedAnnotationId, handleDeleteSelected, handleToolChange, cropMode, handleCropCancel, handleCropToolSelect, undoAnnotations, redoAnnotations]);
+  }, [selectedAnnotationId, handleDeleteSelected, handleToolChange, cropMode, handleCropCancel, handleCropToolSelect, undoAnnotations, redoAnnotations, handleAnnotationUpdate]);
 
   // Export helpers - simplified since cropped image is now the current screenshot
   const getCanvasDataUrl = useCallback((format: 'png' | 'jpeg'): string | null => {
@@ -1618,6 +1673,11 @@ function App() {
             canRedo={canRedo}
             onUndo={undoAnnotations}
             onRedo={redoAnnotations}
+          />
+          <MarkNoteInput
+            annotation={selectedAnnotationId ? annotations.find(a => a.id === selectedAnnotationId) : undefined}
+            onNoteChange={handleNoteChange}
+            inputRef={noteInputRef}
           />
         </>
       )}
