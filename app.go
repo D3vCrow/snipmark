@@ -9,6 +9,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,10 +29,16 @@ import (
 	winEnum "winshot/internal/windows"
 )
 
-// defaultSaveDir is where marked exports land. It matches the folder ShareX
-// already writes captures to, so a raw capture and a marked export sit side
-// by side and both are readable by path from a Claude session.
-const defaultSaveDir = `F:\DevCrow\Dev\.snips`
+// defaultSaveDir is where marked exports land: a subfolder of the folder
+// ShareX writes raw captures to. Deliberately NOT .snips itself, because
+// GetLibraryImages scans this folder and DeleteScreenshot accepts anything
+// inside it, so pointing at .snips would make ShareX's captures deletable
+// from in here. One level down, the app can only delete its own output.
+//
+// Keep in step with config.DefaultSaveDir. Changing one alone is a no-op:
+// config.Load() persists its value on first run, so the `folder == ""`
+// fallbacks below never fire on a machine that has opened the app once.
+const defaultSaveDir = `F:\DevCrow\Dev\.snips\marked`
 
 // Version is set at build time via ldflags
 var Version = "dev"
@@ -645,22 +652,34 @@ func (a *App) SelectFolder() (string, error) {
 	})
 }
 
-// registerHotkeysFromConfig registers hotkeys based on current config
+// registerHotkeysFromConfig registers hotkeys based on current config.
+//
+// Every outcome is logged. Both failure modes were previously silent: an
+// unparseable string was skipped by the `ok` check, and Register's error was
+// discarded, so a hotkey another app already owned looked exactly like one
+// that worked. That turns "the shortcut does nothing" into guesswork, which
+// is what it cost us on 2026-08-29.
 func (a *App) registerHotkeysFromConfig() {
-	// Parse and register fullscreen hotkey
-	if mods, key, ok := hotkeys.ParseHotkeyString(a.config.Hotkeys.Fullscreen); ok {
-		a.hotkeyManager.Register(hotkeys.HotkeyFullscreen, mods, key)
+	register := func(name string, id int, spec string) {
+		if spec == "" {
+			log.Printf("hotkey %s: not configured, skipped", name)
+			return
+		}
+		mods, key, ok := hotkeys.ParseHotkeyString(spec)
+		if !ok {
+			log.Printf("hotkey %s: cannot parse %q, not registered", name, spec)
+			return
+		}
+		if err := a.hotkeyManager.Register(id, mods, key); err != nil {
+			log.Printf("hotkey %s: %q REJECTED by Windows (another app likely owns it): %v", name, spec, err)
+			return
+		}
+		log.Printf("hotkey %s: %q registered", name, spec)
 	}
 
-	// Parse and register region hotkey
-	if mods, key, ok := hotkeys.ParseHotkeyString(a.config.Hotkeys.Region); ok {
-		a.hotkeyManager.Register(hotkeys.HotkeyRegion, mods, key)
-	}
-
-	// Parse and register window hotkey
-	if mods, key, ok := hotkeys.ParseHotkeyString(a.config.Hotkeys.Window); ok {
-		a.hotkeyManager.Register(hotkeys.HotkeyWindow, mods, key)
-	}
+	register("fullscreen", hotkeys.HotkeyFullscreen, a.config.Hotkeys.Fullscreen)
+	register("region", hotkeys.HotkeyRegion, a.config.Hotkeys.Region)
+	register("window", hotkeys.HotkeyWindow, a.config.Hotkeys.Window)
 }
 
 // GetBackgroundImages returns the list of saved background images (base64 data URLs)
