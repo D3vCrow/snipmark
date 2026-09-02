@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { Rect, Ellipse, Arrow, Line, Transformer, Group, Text, Circle, Shape } from 'react-konva';
 import Konva from 'konva';
+import { noteColor } from '../lib/note-palette';
 
 // Constants for better hit detection on thin shapes
 const HIT_STROKE_WIDTH = 28; // Larger clickable area for lines/arrows (increased for easier selection)
@@ -193,6 +194,10 @@ interface AnnotationShapesProps {
   onSelect: (id: string | null) => void;
   onUpdate: (id: string, updates: Partial<Annotation>) => void;
   scale: number;
+  // When true (the default setting), each numbered note wears its own palette
+  // colour, keyed by its number; when false, all pins use the stroke colour
+  // they were drawn with. Only NumberShape consumes this.
+  colorPerNumber: boolean;
 }
 
 interface ShapeProps {
@@ -885,12 +890,15 @@ function SpotlightShape({ annotation, isSelected, onSelect, onUpdate }: ShapePro
   );
 }
 
-function NumberShape({ annotation, isSelected, onSelect, onUpdate }: ShapeProps) {
+function NumberShape({ annotation, isSelected, onSelect, onUpdate, colorPerNumber }: ShapeProps & { colorPerNumber: boolean }) {
   const groupRef = useRef<Konva.Group>(null);
   const trRef = useRef<Konva.Transformer>(null);
 
   // Calculate circle radius based on the number of digits
   const numberValue = annotation.number || 1;
+  // Palette colour keyed by the number itself, so pin, panel row and session
+  // reloads all agree; falls back to the drawn stroke when the toggle is off.
+  const pinFill = colorPerNumber ? noteColor(numberValue) : (annotation.stroke ?? '#ef4444');
   const digitCount = numberValue.toString().length;
   const baseRadius = 18;
   const radius = baseRadius + (digitCount - 1) * 6; // Increase radius for multi-digit numbers
@@ -938,7 +946,7 @@ function NumberShape({ annotation, isSelected, onSelect, onUpdate }: ShapeProps)
           x={0}
           y={0}
           radius={radius}
-          fill={annotation.stroke}
+          fill={pinFill}
           shadowColor="black"
           shadowBlur={4}
           shadowOpacity={0.3}
@@ -1164,6 +1172,7 @@ export function AnnotationShapes({
   selectedId,
   onSelect,
   onUpdate,
+  colorPerNumber,
 }: AnnotationShapesProps) {
   return (
     <Group>
@@ -1188,7 +1197,7 @@ export function AnnotationShapes({
           case 'text':
             return <TextShape key={annotation.id} {...props} />;
           case 'number':
-            return <NumberShape key={annotation.id} {...props} />;
+            return <NumberShape key={annotation.id} {...props} colorPerNumber={colorPerNumber} />;
           case 'spotlight':
             return <SpotlightShape key={annotation.id} {...props} />;
           default:

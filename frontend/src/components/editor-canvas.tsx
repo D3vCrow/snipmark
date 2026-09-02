@@ -34,6 +34,7 @@ interface EditorCanvasProps {
   fontSize: number;
   fontStyle: 'normal' | 'bold' | 'italic' | 'bold italic';
   nextNumber: number; // Next number for number annotations
+  colorPerNumber: boolean; // Palette colour per numbered note (see note-palette.ts)
   onAnnotationAdd: (annotation: Annotation) => void;
   onAnnotationSelect: (id: string | null) => void;
   onAnnotationUpdate: (id: string, updates: Partial<Annotation>) => void;
@@ -199,6 +200,7 @@ export function EditorCanvas({
   fontSize,
   fontStyle,
   nextNumber,
+  colorPerNumber,
   onAnnotationAdd,
   onAnnotationSelect,
   onAnnotationUpdate,
@@ -245,20 +247,17 @@ export function EditorCanvas({
     return () => window.removeEventListener('resize', updateSize);
   }, [screenshot]);
 
-  // Calculate base scale to fit output in container
+  // Never render below 1:1. The snapshot must be at least as big as the
+  // actual pixels - if it does not fit the container, the scroll path
+  // (needsScroll below) takes over rather than shrinking the image to make
+  // room for the tools around it. Chris's requirement, 2026-08-31. This
+  // replaces the old fit-to-container calculation; user zoom still applies
+  // on top, so zooming out by hand remains possible.
   useEffect(() => {
     if (screenshot) {
-      const { totalWidth, totalHeight } = calculateOutputDimensions(
-        screenshot.width,
-        screenshot.height,
-        padding,
-        outputRatio
-      );
-      const scaleX = (containerSize.width - 80) / totalWidth;
-      const scaleY = (containerSize.height - 80) / totalHeight;
-      setBaseScale(Math.min(scaleX, scaleY, 1));
+      setBaseScale(1);
     }
-  }, [screenshot, containerSize, padding, outputRatio]);
+  }, [screenshot]);
 
   // Reset zoom and pan when screenshot changes
   useEffect(() => {
@@ -830,6 +829,7 @@ export function EditorCanvas({
               onSelect={onAnnotationSelect}
               onUpdate={onAnnotationUpdate}
               scale={scale}
+              colorPerNumber={colorPerNumber}
             />
 
             {/* Spotlight overlays - dim areas outside spotlight regions */}

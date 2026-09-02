@@ -4,6 +4,26 @@ export interface CaptureResult {
   data: string;
 }
 
+// Which edges of a backed region snip still have hidden screen behind them.
+// Mirrors Go's Expandable (backing.go); null frontend-side means no backing
+// capture exists at all (fullscreen, window, or library images).
+export interface Expandable {
+  left: boolean;
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+}
+
+// The editable working state written beside an exported image as
+// <name>.snipnote.json - what lets a later session reopen the shot with
+// every note still live. The .md sidecar is the readable final state.
+export interface SessionState {
+  version: 1;
+  imageWidth: number;
+  imageHeight: number;
+  annotations: Annotation[];
+}
+
 export interface WindowInfo {
   handle: number;
   title: string;

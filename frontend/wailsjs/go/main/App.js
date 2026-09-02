@@ -38,6 +38,10 @@ export function DisconnectGDrive() {
   return window['go']['main']['App']['DisconnectGDrive']();
 }
 
+export function ExpandRegion(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExpandRegion'](arg1, arg2, arg3, arg4);
+}
+
 export function FinishRegionCapture() {
   return window['go']['main']['App']['FinishRegionCapture']();
 }
@@ -122,6 +126,10 @@ export function IsR2Configured() {
   return window['go']['main']['App']['IsR2Configured']();
 }
 
+export function LoadSession(arg1) {
+  return window['go']['main']['App']['LoadSession'](arg1);
+}
+
 export function MinimizeToTray() {
   return window['go']['main']['App']['MinimizeToTray']();
 }
@@ -176,6 +184,10 @@ export function SaveR2Config(arg1, arg2, arg3, arg4) {
 
 export function SaveR2Credentials(arg1, arg2) {
   return window['go']['main']['App']['SaveR2Credentials'](arg1, arg2);
+}
+
+export function SaveSession(arg1, arg2) {
+  return window['go']['main']['App']['SaveSession'](arg1, arg2);
 }
 
 export function SaveSidecar(arg1, arg2) {

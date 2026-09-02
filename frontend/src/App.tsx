@@ -14,13 +14,17 @@ import { AnnotationToolbar } from './components/annotation-toolbar';
 import { MarkNoteInput } from './components/mark-note-input';
 import { ExportToolbar } from './components/export-toolbar';
 import { CropToolbar } from './components/crop-toolbar';
-import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage, MarkKind } from './types';
+import { SidePanel } from './components/side-panel';
+import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage, MarkKind, Expandable, SessionState } from './types';
 import {
   CaptureFullscreen,
   CaptureWindow,
   SaveImage,
   QuickSave,
   SaveSidecar,
+  SaveSession,
+  LoadSession,
+  ExpandRegion,
   MinimizeToTray,
   PrepareRegionCapture,
   FinishRegionCapture,
@@ -257,6 +261,27 @@ function App() {
   const [isGDriveConnected, setIsGDriveConnected] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Side panel: placement, width and the per-note colour toggle survive
+  // restarts via localStorage - they are UI habit, not document state.
+  const [panelSide, setPanelSide] = useState<'left' | 'right'>(
+    () => (localStorage.getItem('snipmark.panelSide') === 'left' ? 'left' : 'right')
+  );
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const stored = Number(localStorage.getItem('snipmark.panelWidth'));
+    return Number.isFinite(stored) && stored >= 240 && stored <= 520 ? stored : 320;
+  });
+  const [colorPerNumber, setColorPerNumber] = useState<boolean>(
+    () => localStorage.getItem('snipmark.colorPerNumber') !== 'off'
+  );
+  useEffect(() => { localStorage.setItem('snipmark.panelSide', panelSide); }, [panelSide]);
+  useEffect(() => { localStorage.setItem('snipmark.panelWidth', String(panelWidth)); }, [panelWidth]);
+  useEffect(() => { localStorage.setItem('snipmark.colorPerNumber', colorPerNumber ? 'on' : 'off'); }, [colorPerNumber]);
+
+  // Which edges of the current snip can still reveal more screen; null when
+  // no backing capture exists (fullscreen, window, imported, library images).
+  const [expandable, setExpandable] = useState<Expandable | null>(null);
+  const [revealBusy, setRevealBusy] = useState(false);
 
   // Load editor settings from Go config on startup
   useEffect(() => {
@@ -496,6 +521,7 @@ function App() {
       }
 
       setScreenshot(result);
+      setExpandable(null);
       // Reset annotations for new capture (clears history)
       resetAnnotations([]);
       setSelectedAnnotationId(null);
@@ -525,6 +551,7 @@ function App() {
     try {
       const result = await CaptureWindow(window.handle) as CaptureResult;
       setScreenshot(result);
+      setExpandable(null);
       // Reset annotations for new capture (clears history)
       resetAnnotations([]);
       setSelectedAnnotationId(null);
@@ -547,9 +574,11 @@ function App() {
   };
 
   // Handle native overlay selection result (already cropped by backend)
-  const handleNativeRegionSelect = useCallback((width: number, height: number, screenshotData: string) => {
+  const handleNativeRegionSelect = useCallback((width: number, height: number, screenshotData: string, expandableInfo: Expandable) => {
     // Set screenshot directly - already cropped by Go backend
     setScreenshot({ width, height, data: screenshotData });
+    // Region snips keep a backing capture in Go; remember which edges can grow.
+    setExpandable(expandableInfo);
 
     // Reset annotations for new capture (clears history)
     resetAnnotations([]);
@@ -570,6 +599,7 @@ function App() {
 
   const handleClear = useCallback(() => {
     setScreenshot(null);
+    setExpandable(null);
     resetAnnotations([]);
     setSelectedAnnotationId(null);
     setStatusMessage(undefined);
@@ -600,6 +630,7 @@ function App() {
       }
 
       setScreenshot(result as CaptureResult);
+      setExpandable(null);
       // Reset annotations and crop state for imported image (clears history)
       resetAnnotations([]);
       setSelectedAnnotationId(null);
@@ -633,6 +664,7 @@ function App() {
       }
 
       setScreenshot(result as CaptureResult);
+      setExpandable(null);
       // Reset annotations and crop state for clipboard image (clears history)
       resetAnnotations([]);
       setSelectedAnnotationId(null);
@@ -688,6 +720,7 @@ function App() {
           data: base64Data,
         };
         setScreenshot(result);
+        setExpandable(null);
         resetAnnotations([]);
         setSelectedAnnotationId(null);
         setActiveTool('select');
@@ -761,8 +794,9 @@ function App() {
       width: number;
       height: number;
       screenshot: string;
+      expandable: Expandable;
     }) => {
-      handleNativeRegionSelect(data.width, data.height, data.screenshot);
+      handleNativeRegionSelect(data.width, data.height, data.screenshot, data.expandable);
     };
 
     // Handle tray library event (left-click on tray icon)
@@ -804,6 +838,7 @@ function App() {
       if (result) {
         // Clear previous editor state
         setScreenshot(result as CaptureResult);
+        setExpandable(null);
         resetAnnotations([]);
         setSelectedAnnotationId(null);
         setActiveTool('select');
@@ -819,6 +854,18 @@ function App() {
         setCropMode(false);
         // Track source path for "Save" functionality
         setLastSavedPath(image.filepath);
+        // Restore the editable session if one was saved beside this image.
+        try {
+          const raw = await LoadSession(image.filepath);
+          if (raw) {
+            const session = JSON.parse(raw) as SessionState;
+            if (Array.isArray(session.annotations)) {
+              resetAnnotations(session.annotations);
+            }
+          }
+        } catch (e) {
+          console.error('Session restore failed, opening without notes:', e);
+        }
         setStatusMessage('Opened from library');
         setTimeout(() => setStatusMessage(undefined), 2000);
       }
@@ -949,6 +996,42 @@ function App() {
     }
   }, [selectedAnnotationId]);
 
+  // Delete from the notes list, which addresses rows by id, not selection.
+  const handleDeleteAnnotationById = useCallback((id: string) => {
+    setAnnotations((prev) => prev.filter((ann) => ann.id !== id));
+    setSelectedAnnotationId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  // Grow a backed region snip outward. Go re-crops the kept full-screen image
+  // and reports the applied per-edge deltas (requests clamp at the screen
+  // bounds); every annotation shifts by the left/top growth so marks stay
+  // glued to their pixels. The screenshot swap itself is not in the undo
+  // history, so undo after a reveal moves marks without shrinking the image
+  // back - accepted: reveal is additive and re-croppable.
+  const handleReveal = useCallback(async (left: number, top: number, right: number, bottom: number) => {
+    if (revealBusy) return;
+    setRevealBusy(true);
+    try {
+      const res = await ExpandRegion(left, top, right, bottom);
+      if (res.data) {
+        setScreenshot({ width: res.width, height: res.height, data: res.data });
+        if (res.appliedLeft > 0 || res.appliedTop > 0) {
+          setAnnotations((prev) => prev.map((a) => ({
+            ...a,
+            x: a.x + res.appliedLeft,
+            y: a.y + res.appliedTop,
+          })));
+        }
+      }
+      setExpandable(res.expandable);
+    } catch (error) {
+      console.error('Reveal failed:', error);
+      setStatusMessage('Reveal failed');
+      setTimeout(() => setStatusMessage(undefined), 3000);
+    }
+    setRevealBusy(false);
+  }, [revealBusy]);
+
   // Crop handlers - snapshot-based workflow
   const handleCropToolSelect = useCallback(() => {
     setActiveTool('crop');
@@ -1070,6 +1153,7 @@ function App() {
 
     // Set cropped image as current screenshot
     setScreenshot(croppedImage);
+    setExpandable(null);
     // Reset annotations with new positions (clears undo history since canvas context changed)
     resetAnnotations(adjustedAnnotations);
 
@@ -1324,14 +1408,22 @@ function App() {
       const imageName = imagePath.split(/[\\/]/).pop() ?? 'screenshot.png';
       const sidecar = toSidecar(annotations, imageName);
       // No kinds and no notes means nothing to say; leave no stray .md behind.
-      if (!sidecar) return;
       // Swap the extension without crossing a path separator, so a folder with
       // a dot in its name cannot swallow the filename.
-      await SaveSidecar(imagePath.replace(/\.[^.\\/]+$/, '.md'), sidecar);
+      if (sidecar) {
+        await SaveSidecar(imagePath.replace(/\.[^.\\/]+$/, '.md'), sidecar);
+      }
+      // Beside the readable .md, the editable working state: a later session
+      // reopens this shot with every note still live. Empty state clears any
+      // stale file so deleted notes cannot resurrect on reopen.
+      const session: SessionState | null = annotations.length > 0 && screenshot
+        ? { version: 1, imageWidth: screenshot.width, imageHeight: screenshot.height, annotations }
+        : null;
+      await SaveSession(imagePath, session ? JSON.stringify(session) : '');
     } catch (error) {
       console.error('Sidecar write failed:', error);
     }
-  }, [annotations]);
+  }, [annotations, screenshot]);
 
   const handleSave = useCallback(async (format: 'png' | 'jpeg') => {
     const dataUrl = getCanvasDataUrl(format);
@@ -1642,38 +1734,25 @@ function App() {
     return () => window.removeEventListener('keydown', handleExportKeyDown);
   }, [screenshot, handleSave, handleQuickSave, handleCopyToClipboard, handleImportImage, handleClipboardCapture]);
 
-  return (
-    <div
-      className="flex flex-col h-screen bg-transparent relative"
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
+  // The tool column beside the canvas. Defined once, slotted left or right
+  // of the canvas below; hidden during crop mode like the old toolbar row.
+  const sidePanel = screenshot && !cropMode ? (
+    <SidePanel
+      side={panelSide}
+      width={panelWidth}
+      onSideFlip={() => setPanelSide((s) => (s === 'right' ? 'left' : 'right'))}
+      onWidthChange={setPanelWidth}
+      colorPerNumber={colorPerNumber}
+      onColorPerNumberChange={setColorPerNumber}
+      annotations={annotations}
+      selectedAnnotationId={selectedAnnotationId}
+      onSelectAnnotation={setSelectedAnnotationId}
+      onUpdateAnnotation={handleAnnotationUpdate}
+      onDeleteAnnotation={handleDeleteAnnotationById}
+      expandable={cropState.isCropApplied ? null : expandable}
+      onReveal={handleReveal}
+      revealBusy={revealBusy}
     >
-      {/* Drag & drop overlay */}
-      {isDragging && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-violet-500/20 backdrop-blur-sm border-2 border-dashed border-violet-400 rounded-lg m-2 pointer-events-none">
-          <div className="text-center">
-            <div className="text-4xl mb-2">📷</div>
-            <div className="text-lg font-semibold text-violet-200">Drop image to import</div>
-            <div className="text-sm text-violet-300/70">PNG, JPEG, GIF, WebP supported</div>
-          </div>
-        </div>
-      )}
-      <TitleBar onMinimize={handleMinimizeToTray} />
-      <CaptureToolbar
-        onCapture={handleCapture}
-        isCapturing={isCapturing}
-        hasScreenshot={!!screenshot}
-        onClear={handleClear}
-        onMinimize={handleMinimizeToTray}
-        onOpenSettings={() => setShowSettings(true)}
-        onImportImage={handleImportImage}
-        onClipboardCapture={handleClipboardCapture}
-      />
-
-      {screenshot && !cropMode && (
-        <>
           <AnnotationToolbar
             activeTool={activeTool}
             strokeColor={strokeColor}
@@ -1705,8 +1784,39 @@ function App() {
             onNoteChange={handleNoteChange}
             inputRef={noteInputRef}
           />
-        </>
+    </SidePanel>
+  ) : null;
+
+  return (
+    <div
+      className="flex flex-col h-screen bg-transparent relative"
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+    >
+      {/* Drag & drop overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-violet-500/20 backdrop-blur-sm border-2 border-dashed border-violet-400 rounded-lg m-2 pointer-events-none">
+          <div className="text-center">
+            <div className="text-4xl mb-2">📷</div>
+            <div className="text-lg font-semibold text-violet-200">Drop image to import</div>
+            <div className="text-sm text-violet-300/70">PNG, JPEG, GIF, WebP supported</div>
+          </div>
+        </div>
       )}
+      <TitleBar onMinimize={handleMinimizeToTray} />
+      <CaptureToolbar
+        onCapture={handleCapture}
+        isCapturing={isCapturing}
+        hasScreenshot={!!screenshot}
+        onClear={handleClear}
+        onMinimize={handleMinimizeToTray}
+        onOpenSettings={() => setShowSettings(true)}
+        onImportImage={handleImportImage}
+        onClipboardCapture={handleClipboardCapture}
+      />
+
 
       {screenshot && cropMode && (
         <div className="flex justify-center py-2">
@@ -1723,6 +1833,7 @@ function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
+        {panelSide === 'left' && sidePanel}
         <EditorCanvas
           screenshot={screenshot}
           padding={padding}
@@ -1748,6 +1859,7 @@ function App() {
           fontSize={fontSize}
           fontStyle={fontStyle}
           nextNumber={nextNumber}
+          colorPerNumber={colorPerNumber}
           onAnnotationAdd={handleAnnotationAdd}
           onAnnotationSelect={handleAnnotationSelect}
           onAnnotationUpdate={handleAnnotationUpdate}
@@ -1797,6 +1909,7 @@ function App() {
             onBorderTypeChange={setBorderType}
           />
         )}
+        {panelSide === 'right' && sidePanel}
       </div>
 
       {screenshot && (
