@@ -36,6 +36,9 @@ interface SidePanelProps {
   expandable: Expandable | null;
   onReveal: (left: number, top: number, right: number, bottom: number) => void;
   revealBusy: boolean;
+  // Floating palette mode (editor windows): rendered inside a FloatingPanel,
+  // so no docked borders, no flip button, and height capped to the viewport.
+  floating?: boolean;
   children: ReactNode;
 }
 
@@ -63,6 +66,7 @@ export function SidePanel({
   expandable,
   onReveal,
   revealBusy,
+  floating,
   children,
 }: SidePanelProps) {
   const [dragging, setDragging] = useState(false);
@@ -75,7 +79,10 @@ export function SidePanel({
     const onMove = (e: PointerEvent) => {
       const rect = panelRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const w = side === 'right' ? rect.right - e.clientX : e.clientX - rect.left;
+      // Floating: the handle sits on the panel's right edge, so width grows
+      // with the cursor. Docked: the handle faces the canvas, so the math
+      // depends on which side the panel is docked.
+      const w = floating || side === 'left' ? e.clientX - rect.left : rect.right - e.clientX;
       onWidthChange(Math.min(520, Math.max(240, Math.round(w))));
     };
     const onUp = () => setDragging(false);
@@ -85,7 +92,7 @@ export function SidePanel({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [dragging, side, onWidthChange]);
+  }, [dragging, side, floating, onWidthChange]);
 
   const noteRows = annotations
     .filter((a) => a.type === 'number')
@@ -113,12 +120,16 @@ export function SidePanel({
   );
 
   return (
-    <div className="flex flex-none h-full">
-      {side === 'right' && resizeHandle}
+    <div className={floating ? 'flex' : 'flex flex-none h-full'}>
+      {!floating && side === 'right' && resizeHandle}
       <div
         ref={panelRef}
-        style={{ width }}
-        className="flex flex-col h-full glass-light border-l border-r border-white/10 overflow-hidden"
+        style={floating ? { width, maxHeight: '80vh' } : { width }}
+        className={
+          floating
+            ? 'flex flex-col overflow-hidden'
+            : 'flex flex-col h-full glass-light border-l border-r border-white/10 overflow-hidden'
+        }
       >
         {/* Panel header: flip side + colour toggle */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
@@ -135,13 +146,15 @@ export function SidePanel({
             >
               <Palette className="w-5 h-5" />
             </button>
-            <button
-              onClick={onSideFlip}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all duration-200"
-              title={`Move panel to the ${side === 'right' ? 'left' : 'right'}`}
-            >
-              <ArrowLeftRight className="w-5 h-5" />
-            </button>
+            {!floating && (
+              <button
+                onClick={onSideFlip}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all duration-200"
+                title={`Move panel to the ${side === 'right' ? 'left' : 'right'}`}
+              >
+                <ArrowLeftRight className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -271,7 +284,8 @@ export function SidePanel({
           )}
         </div>
       </div>
-      {side === 'left' && resizeHandle}
+      {!floating && side === 'left' && resizeHandle}
+      {floating && resizeHandle}
     </div>
   );
 }

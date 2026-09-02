@@ -14,7 +14,9 @@ import { AnnotationToolbar } from './components/annotation-toolbar';
 import { MarkNoteInput } from './components/mark-note-input';
 import { ExportToolbar } from './components/export-toolbar';
 import { CropToolbar } from './components/crop-toolbar';
+import { Settings2 } from 'lucide-react';
 import { SidePanel } from './components/side-panel';
+import { FloatingPanel } from './components/floating-panel';
 import { CaptureResult, CaptureMode, WindowInfo, Annotation, EditorTool, OutputRatio, CropArea, CropAspectRatio, CropState, BorderType, LibraryImage, MarkKind, Expandable, SessionState } from './types';
 import {
   CaptureFullscreen,
@@ -46,7 +48,7 @@ import {
   OpenInEditor,
 } from '../wailsjs/go/main/App';
 import { updater } from '../wailsjs/go/models';
-import { EventsOn, EventsOff, WindowGetSize } from '../wailsjs/runtime/runtime';
+import { EventsOn, EventsOff, WindowGetSize, WindowMaximise } from '../wailsjs/runtime/runtime';
 import { extractDominantEdgeColor } from './utils/extract-edge-color';
 import { toSidecar } from './lib/sidecar';
 
@@ -289,6 +291,9 @@ function App() {
   // Editor-window mode: this whole process exists to edit one image
   // (see editor_mode.go). Set once from GetLaunchInfo on mount; '' = main.
   const [editorPath, setEditorPath] = useState<string>('');
+  // Editor windows tuck the style/settings column behind a toggle - notes
+  // are the job; padding and borders are occasional.
+  const [stylePanelOpen, setStylePanelOpen] = useState(false);
 
   // Load editor settings from Go config on startup
   useEffect(() => {
@@ -901,6 +906,8 @@ function App() {
         const info = await GetLaunchInfo();
         if (!info.editorMode || !info.imagePath) return;
         setEditorPath(info.imagePath);
+        // The image is the window: start maximised, palettes float over it.
+        WindowMaximise();
         await handleLibraryEdit({ filepath: info.imagePath } as LibraryImage);
         setLastSavedPath(info.imagePath);
         // A fresh snip's backing rode along into this process; reveal works
@@ -1776,10 +1783,49 @@ function App() {
     return () => window.removeEventListener('keydown', handleExportKeyDown);
   }, [screenshot, handleSave, handleQuickSave, handleCopyToClipboard, handleImportImage, handleClipboardCapture]);
 
+  // The style column (padding, borders, background), defined once - docked
+  // in the main window, floating behind a toggle in editor windows.
+  const settingsPanelEl = screenshot ? (
+    <SettingsPanel
+      padding={padding}
+      cornerRadius={cornerRadius}
+      shadowSize={shadowSize}
+      backgroundColor={backgroundColor}
+      outputRatio={outputRatio}
+      showBackground={showBackground}
+      imageWidth={screenshot.width}
+      imageHeight={screenshot.height}
+      inset={inset}
+      autoBackground={autoBackground}
+      extractedColor={extractedColor}
+      insetBackgroundColor={insetBackgroundColor}
+      borderEnabled={borderEnabled}
+      borderWeight={borderWeight}
+      borderColor={borderColor}
+      borderOpacity={borderOpacity}
+      borderType={borderType}
+      onPaddingChange={setPadding}
+      onCornerRadiusChange={setCornerRadius}
+      onShadowSizeChange={setShadowSize}
+      onBackgroundChange={setBackgroundColor}
+      onOutputRatioChange={setOutputRatio}
+      onShowBackgroundChange={handleShowBackgroundChange}
+      onInsetChange={setInset}
+      onAutoBackgroundChange={handleAutoBackgroundChange}
+      onInsetBackgroundColorChange={setInsetBackgroundColor}
+      onBorderEnabledChange={setBorderEnabled}
+      onBorderWeightChange={setBorderWeight}
+      onBorderColorChange={setBorderColor}
+      onBorderOpacityChange={setBorderOpacity}
+      onBorderTypeChange={setBorderType}
+    />
+  ) : null;
+
   // The tool column beside the canvas. Defined once, slotted left or right
   // of the canvas below; hidden during crop mode like the old toolbar row.
   const sidePanel = screenshot && !cropMode ? (
     <SidePanel
+      floating={!!editorPath}
       side={panelSide}
       width={panelWidth}
       onSideFlip={() => setPanelSide((s) => (s === 'right' ? 'left' : 'right'))}
@@ -1877,8 +1923,8 @@ function App() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        {panelSide === 'left' && sidePanel}
+      <div className="flex flex-1 overflow-hidden relative">
+        {!editorPath && panelSide === 'left' && sidePanel}
         <EditorCanvas
           screenshot={screenshot}
           padding={padding}
@@ -1919,42 +1965,35 @@ function App() {
           onDrawingCropChange={setIsDrawingCrop}
         />
 
-        {screenshot && (
-          <SettingsPanel
-            padding={padding}
-            cornerRadius={cornerRadius}
-            shadowSize={shadowSize}
-            backgroundColor={backgroundColor}
-            outputRatio={outputRatio}
-            showBackground={showBackground}
-            imageWidth={screenshot.width}
-            imageHeight={screenshot.height}
-            inset={inset}
-            autoBackground={autoBackground}
-            extractedColor={extractedColor}
-            insetBackgroundColor={insetBackgroundColor}
-            borderEnabled={borderEnabled}
-            borderWeight={borderWeight}
-            borderColor={borderColor}
-            borderOpacity={borderOpacity}
-            borderType={borderType}
-            onPaddingChange={setPadding}
-            onCornerRadiusChange={setCornerRadius}
-            onShadowSizeChange={setShadowSize}
-            onBackgroundChange={setBackgroundColor}
-            onOutputRatioChange={setOutputRatio}
-            onShowBackgroundChange={handleShowBackgroundChange}
-            onInsetChange={setInset}
-            onAutoBackgroundChange={handleAutoBackgroundChange}
-            onInsetBackgroundColorChange={setInsetBackgroundColor}
-            onBorderEnabledChange={setBorderEnabled}
-            onBorderWeightChange={setBorderWeight}
-            onBorderColorChange={setBorderColor}
-            onBorderOpacityChange={setBorderOpacity}
-            onBorderTypeChange={setBorderType}
-          />
+        {!editorPath && screenshot && settingsPanelEl}
+        {!editorPath && panelSide === 'right' && sidePanel}
+        {/* Editor windows: the image IS the window; tools float over it and
+            move independently (Chris, 2026-09-02) */}
+        {editorPath && sidePanel && (
+          <FloatingPanel id="tools" initialX={24} initialY={16}>
+            {sidePanel}
+          </FloatingPanel>
         )}
-        {panelSide === 'right' && sidePanel}
+        {editorPath && screenshot && stylePanelOpen && (
+          <FloatingPanel id="style" initialX={Math.max(24, window.innerWidth - 360)} initialY={16}>
+            <div className="w-[300px] max-h-[80vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
+              {settingsPanelEl}
+            </div>
+          </FloatingPanel>
+        )}
+        {editorPath && screenshot && (
+          <button
+            onClick={() => setStylePanelOpen((v) => !v)}
+            className={`absolute top-3 right-3 z-20 p-2 rounded-lg transition-all duration-200 border border-white/10 ${
+              stylePanelOpen
+                ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/30'
+                : 'bg-black/40 text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+            title="Style: padding, background, borders"
+          >
+            <Settings2 className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {screenshot && (
