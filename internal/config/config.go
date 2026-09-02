@@ -98,15 +98,21 @@ type Config struct {
 	BackgroundImages []string        `json:"backgroundImages,omitempty"`
 }
 
-// DefaultSaveDir is where marked exports land. It matches the folder ShareX
-// already writes captures to, so a raw capture and a marked export sit side
-// by side and both are readable by path from a Claude session.
+// DefaultSaveDir is where marked exports land: a subfolder of the folder
+// ShareX writes raw captures to, so both are readable by path from a Claude
+// session without sharing one directory.
+//
+// The subfolder is not tidiness. This app's library scans its save folder and
+// DeleteScreenshot accepts anything inside it, so pointing it straight at
+// .snips would make every ShareX capture listable and deletable from in here.
+// Keeping marked exports one level down means the app can only ever delete
+// its own output.
 //
 // This is the copy that actually decides. app.go has its own defaultSaveDir
 // for the `folder == ""` fallbacks, but Load() persists this value on first
 // run, so those fallbacks never fire on a machine that has launched the app
 // even once. Change both together or the change is inert.
-const DefaultSaveDir = `F:\DevCrow\Dev\.snips`
+const DefaultSaveDir = `F:\DevCrow\Dev\.snips\marked`
 
 // Default returns default configuration
 func Default() *Config {
