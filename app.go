@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -52,12 +53,19 @@ type App struct {
 	config           *config.Config
 	lastWidth        int
 	lastHeight       int
-	preCaptureWidth  int  // Window size before capture (protected from resize events)
+	preCaptureWidth  int // Window size before capture (protected from resize events)
 	preCaptureHeight int
 	preCaptureX      int  // Window X position before capture
 	preCaptureY      int  // Window Y position before capture
 	isCapturing      bool // Flag to prevent resize events during capture
 	isWindowHidden   bool // Track window visibility state
+
+	// Backing capture: the full virtual screen a region snip was cut from,
+	// kept so the snip can be expanded later without a second capture.
+	// See backing.go. Guarded by backingMu; cleared on any non-region capture.
+	backingMu   sync.Mutex
+	backingImg  *image.RGBA
+	backingRect image.Rectangle
 
 	// Cloud upload
 	credManager    *upload.CredentialManager
@@ -223,8 +231,8 @@ func (a *App) OnBeforeClose(ctx context.Context) bool {
 
 // VirtualScreenBounds represents the combined bounds of all monitors
 type VirtualScreenBounds struct {
-	X      int `json:"x"`      // Can be negative (monitor left of primary)
-	Y      int `json:"y"`      // Can be negative (monitor above primary)
+	X      int `json:"x"` // Can be negative (monitor left of primary)
+	Y      int `json:"y"` // Can be negative (monitor above primary)
 	Width  int `json:"width"`
 	Height int `json:"height"`
 }
@@ -312,7 +320,8 @@ func (a *App) PrepareRegionCapture() (*RegionCaptureData, error) {
 		scaledH := int(float64(selResult.Height) * scaleRatio)
 
 		// Crop to selected region before encoding (much faster - smaller image)
-		croppedImg := rgbaImg.SubImage(image.Rect(scaledX, scaledY, scaledX+scaledW, scaledY+scaledH))
+		cropRect := image.Rect(scaledX, scaledY, scaledX+scaledW, scaledY+scaledH)
+		croppedImg := rgbaImg.SubImage(cropRect)
 
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, croppedImg); err != nil {
@@ -322,11 +331,15 @@ func (a *App) PrepareRegionCapture() (*RegionCaptureData, error) {
 			return
 		}
 
+		// Keep the full screen so the snip can be expanded later (backing.go).
+		a.setBacking(rgbaImg, cropRect)
+
 		// Emit cropped image directly - no need for frontend to crop again
 		runtime.EventsEmit(a.ctx, "region:selected", map[string]interface{}{
 			"width":      scaledW,
 			"height":     scaledH,
 			"screenshot": base64.StdEncoding.EncodeToString(buf.Bytes()),
+			"expandable": a.backingExpandable(),
 		})
 	}()
 
@@ -378,6 +391,7 @@ func (a *App) ShowWindow() {
 
 // CaptureFullscreen captures the display where the cursor is currently located
 func (a *App) CaptureFullscreen() (*screenshot.CaptureResult, error) {
+	a.clearBacking() // a fullscreen shot has nothing hidden around it
 	return screenshot.CaptureFullscreen()
 }
 
@@ -393,6 +407,7 @@ func (a *App) CaptureDisplay(displayIndex int) (*screenshot.CaptureResult, error
 
 // CaptureWindow captures a specific window by handle
 func (a *App) CaptureWindow(hwnd int) (*screenshot.CaptureResult, error) {
+	a.clearBacking() // window shots come from a different source; nothing to reveal
 	result, err := screenshot.CaptureWindowByCoords(uintptr(hwnd))
 
 	// Bring WinShot back to front after capture
@@ -981,6 +996,7 @@ func (a *App) GetLibraryImages() ([]library.LibraryImage, error) {
 // OpenInEditor loads an image file into the editor
 // Security: validates path is within QuickSave folder
 func (a *App) OpenInEditor(imagePath string) (*screenshot.CaptureResult, error) {
+	a.clearBacking() // a file from disk was never cut from the live screen
 	// Validate path is within QuickSave folder (prevent directory traversal)
 	folder := a.config.QuickSave.Folder
 	if folder == "" {
@@ -1074,4 +1090,46 @@ func (a *App) SaveSidecar(path string, contents string) error {
 		return nil
 	}
 	return os.WriteFile(path, []byte(contents), 0644)
+}
+
+// sessionPathFor maps an exported image to its editable-session file:
+// shot.png -> shot.snipnote.json. The extension swap deliberately reuses the
+// sidecar's separator-safe pattern - never cross a path separator.
+func sessionPathFor(imagePath string) string {
+	ext := filepath.Ext(imagePath)
+	if ext == "" {
+		return imagePath + ".snipnote.json"
+	}
+	return strings.TrimSuffix(imagePath, ext) + ".snipnote.json"
+}
+
+// SaveSession writes the raw annotation state beside an exported image, so a
+// later session can reopen the shot with every note still editable. The .md
+// sidecar is the readable final state; this is the working state. Empty
+// contents remove a stale session file rather than leaving one that would
+// resurrect deleted notes on reopen.
+func (a *App) SaveSession(imagePath string, contents string) error {
+	p := sessionPathFor(imagePath)
+	if contents == "" {
+		err := os.Remove(p)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return os.WriteFile(p, []byte(contents), 0644)
+}
+
+// LoadSession returns the saved annotation state for an image, or "" when
+// none exists. Only a real read failure is an error - absence is the normal
+// case for anything captured before sessions existed.
+func (a *App) LoadSession(imagePath string) (string, error) {
+	data, err := os.ReadFile(sessionPathFor(imagePath))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
