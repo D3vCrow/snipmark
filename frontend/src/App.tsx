@@ -25,6 +25,9 @@ import {
   SaveSession,
   LoadSession,
   ExpandRegion,
+  GetLaunchInfo,
+  SaveImageToPath,
+  CaptureFullscreenToEditor,
   MinimizeToTray,
   PrepareRegionCapture,
   FinishRegionCapture,
@@ -283,6 +286,10 @@ function App() {
   const [expandable, setExpandable] = useState<Expandable | null>(null);
   const [revealBusy, setRevealBusy] = useState(false);
 
+  // Editor-window mode: this whole process exists to edit one image
+  // (see editor_mode.go). Set once from GetLaunchInfo on mount; '' = main.
+  const [editorPath, setEditorPath] = useState<string>('');
+
   // Load editor settings from Go config on startup
   useEffect(() => {
     const loadEditorSettings = async () => {
@@ -515,7 +522,13 @@ function App() {
       let result: CaptureResult;
 
       if (mode === 'fullscreen') {
-        result = await CaptureFullscreen() as CaptureResult;
+        // Per-snip: the capture opens in its own editor window; this window
+        // only reports that it happened.
+        await CaptureFullscreenToEditor();
+        setStatusMessage('Fullscreen captured - editor window opened');
+        setTimeout(() => setStatusMessage(undefined), 2000);
+        setIsCapturing(false);
+        return;
       } else {
         throw new Error('Invalid capture mode');
       }
@@ -875,6 +888,31 @@ function App() {
       setTimeout(() => setStatusMessage(undefined), 3000);
     }
   }, [resetAnnotations]);
+
+  // Editor-window boot: ask Go which mode this process is, once. In editor
+  // mode, load the image this window exists for (same path as a library
+  // open, so the saved session comes back too) and hide the capture chrome.
+  const editorBootRan = useRef(false);
+  useEffect(() => {
+    if (editorBootRan.current) return;
+    editorBootRan.current = true;
+    (async () => {
+      try {
+        const info = await GetLaunchInfo();
+        if (!info.editorMode || !info.imagePath) return;
+        setEditorPath(info.imagePath);
+        await handleLibraryEdit({ filepath: info.imagePath } as LibraryImage);
+        setLastSavedPath(info.imagePath);
+        // A fresh snip's backing rode along into this process; reveal works
+        // here, in the window doing the editing.
+        setExpandable(info.expandable ?? null);
+        setStatusMessage(undefined);
+      } catch (e) {
+        console.error('Editor boot failed:', e);
+        setStatusMessage('Failed to open this snip');
+      }
+    })();
+  }, [handleLibraryEdit]);
 
   const handleLibraryCapture = useCallback(() => {
     setShowLibrary(false);
@@ -1466,7 +1504,11 @@ function App() {
 
     try {
       const base64Data = getBase64FromDataUrl(dataUrl);
-      const result = await QuickSave(base64Data, format);
+      // An editor window re-saves its own file in place; the main window's
+      // quick-save mints a new timestamped file as before.
+      const result = editorPath
+        ? await SaveImageToPath(editorPath, base64Data)
+        : await QuickSave(base64Data, format);
 
       if (result.success) {
         setLastSavedPath(result.filePath);
@@ -1489,7 +1531,7 @@ function App() {
 
     setIsExporting(false);
     setTimeout(() => setStatusMessage(undefined), 3000);
-  }, [getCanvasDataUrl, writeSidecar]);
+  }, [getCanvasDataUrl, writeSidecar, editorPath]);
 
   // Copy file path to clipboard
   const handleCopyPath = useCallback(async () => {
@@ -1806,16 +1848,19 @@ function App() {
         </div>
       )}
       <TitleBar onMinimize={handleMinimizeToTray} />
-      <CaptureToolbar
-        onCapture={handleCapture}
-        isCapturing={isCapturing}
-        hasScreenshot={!!screenshot}
-        onClear={handleClear}
-        onMinimize={handleMinimizeToTray}
-        onOpenSettings={() => setShowSettings(true)}
-        onImportImage={handleImportImage}
-        onClipboardCapture={handleClipboardCapture}
-      />
+      {/* An editor window is one image and its tools; capture lives in the main instance */}
+      {!editorPath && (
+              <CaptureToolbar
+          onCapture={handleCapture}
+          isCapturing={isCapturing}
+          hasScreenshot={!!screenshot}
+          onClear={handleClear}
+          onMinimize={handleMinimizeToTray}
+          onOpenSettings={() => setShowSettings(true)}
+          onImportImage={handleImportImage}
+          onClipboardCapture={handleClipboardCapture}
+        />
+      )}
 
 
       {screenshot && cropMode && (

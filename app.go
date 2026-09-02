@@ -67,6 +67,11 @@ type App struct {
 	backingImg  *image.RGBA
 	backingRect image.Rectangle
 
+	// Editor-window mode (see editor_mode.go): this process is one snip's
+	// editing window - no hotkeys, no tray, no overlay, no config writes.
+	editMode bool
+	editPath string
+
 	// Cloud upload
 	credManager    *upload.CredentialManager
 	r2Uploader     *upload.R2Uploader
@@ -89,31 +94,35 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.config = cfg
 
-	// Initialize hotkey manager
-	a.hotkeyManager = hotkeys.NewHotkeyManager()
-	a.hotkeyManager.SetCallback(a.onHotkey)
+	// An editor window owns one image, not the machine: global hotkeys, the
+	// tray icon and the capture overlay all stay with the main instance.
+	if !a.editMode {
+		// Initialize hotkey manager
+		a.hotkeyManager = hotkeys.NewHotkeyManager()
+		a.hotkeyManager.SetCallback(a.onHotkey)
 
-	// Register hotkeys from config
-	a.registerHotkeysFromConfig()
-	a.hotkeyManager.Start()
+		// Register hotkeys from config
+		a.registerHotkeysFromConfig()
+		a.hotkeyManager.Start()
 
-	// Initialize overlay manager for native region selection
-	a.overlayManager = overlay.NewManager()
-	if err := a.overlayManager.Start(); err != nil {
-		// Log warning but continue - will fall back to React overlay
-		println("Warning: failed to start overlay manager:", err.Error())
+		// Initialize overlay manager for native region selection
+		a.overlayManager = overlay.NewManager()
+		if err := a.overlayManager.Start(); err != nil {
+			// Log warning but continue - will fall back to React overlay
+			println("Warning: failed to start overlay manager:", err.Error())
+		}
+
+		// Initialize system tray with version in tooltip
+		a.trayIcon = tray.NewTrayIcon(fmt.Sprintf("WinShot v%s", Version))
+		a.trayIcon.SetCallback(a.onTrayMenu)
+		a.trayIcon.SetOnShow(func() {
+			runtime.WindowShow(a.ctx)
+			a.isWindowHidden = false
+			runtime.WindowSetAlwaysOnTop(a.ctx, true)
+			runtime.WindowSetAlwaysOnTop(a.ctx, false)
+		})
+		a.trayIcon.Start()
 	}
-
-	// Initialize system tray with version in tooltip
-	a.trayIcon = tray.NewTrayIcon(fmt.Sprintf("WinShot v%s", Version))
-	a.trayIcon.SetCallback(a.onTrayMenu)
-	a.trayIcon.SetOnShow(func() {
-		runtime.WindowShow(a.ctx)
-		a.isWindowHidden = false
-		runtime.WindowSetAlwaysOnTop(a.ctx, true)
-		runtime.WindowSetAlwaysOnTop(a.ctx, false)
-	})
-	a.trayIcon.Start()
 
 	// Initialize window size tracking with config values
 	a.lastWidth = cfg.Window.Width
@@ -138,8 +147,10 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called when the app is closing
 func (a *App) shutdown(ctx context.Context) {
-	// Save window size before closing using tracked values
-	if a.config != nil && a.lastWidth >= 800 && a.lastHeight >= 600 {
+	// Save window size before closing using tracked values. Editor windows
+	// never write config: with several open, whichever closed last would
+	// clobber the main window's saved size.
+	if !a.editMode && a.config != nil && a.lastWidth >= 800 && a.lastHeight >= 600 {
 		a.config.Window.Width = a.lastWidth
 		a.config.Window.Height = a.lastHeight
 		a.config.Save()
@@ -162,7 +173,13 @@ func (a *App) shutdown(ctx context.Context) {
 func (a *App) onHotkey(id int) {
 	switch id {
 	case hotkeys.HotkeyFullscreen:
-		runtime.EventsEmit(a.ctx, "hotkey:fullscreen")
+		// Per-snip: capture, save, open an editor window; the main window
+		// stays wherever it was instead of coming forward to edit.
+		go func() {
+			if err := a.CaptureFullscreenToEditor(); err != nil {
+				log.Printf("fullscreen capture: %v", err)
+			}
+		}()
 	case hotkeys.HotkeyRegion:
 		runtime.EventsEmit(a.ctx, "hotkey:region")
 	case hotkeys.HotkeyWindow:
@@ -174,7 +191,11 @@ func (a *App) onHotkey(id int) {
 func (a *App) onTrayMenu(menuID int) {
 	switch menuID {
 	case tray.MenuFullscreen:
-		runtime.EventsEmit(a.ctx, "hotkey:fullscreen")
+		go func() {
+			if err := a.CaptureFullscreenToEditor(); err != nil {
+				log.Printf("fullscreen capture: %v", err)
+			}
+		}()
 	case tray.MenuRegion:
 		runtime.EventsEmit(a.ctx, "hotkey:region")
 	case tray.MenuWindow:
@@ -220,6 +241,11 @@ func (a *App) MinimizeToTray() {
 // OnBeforeClose is called when the window close button is clicked
 // Returns true to prevent the default close behavior (if close-to-tray is enabled)
 func (a *App) OnBeforeClose(ctx context.Context) bool {
+	// Editor windows really close - close-to-tray is a main-instance habit,
+	// and a hidden orphan editor process would just leak.
+	if a.editMode {
+		return false
+	}
 	if a.config != nil && a.config.Startup.CloseToTray {
 		// Hide window instead of closing
 		runtime.WindowHide(ctx)
@@ -331,16 +357,23 @@ func (a *App) PrepareRegionCapture() (*RegionCaptureData, error) {
 			return
 		}
 
-		// Keep the full screen so the snip can be expanded later (backing.go).
-		a.setBacking(rgbaImg, cropRect)
+		// Per-snip (Chris, 2026-09-02): the snip is saved to disk immediately
+		// and opens in its own editor window. The full screen it was cut from
+		// rides along so reveal works inside that window; this process keeps
+		// no backing - the snip is not being edited here.
+		snipPath, err := a.saveCaptureToDisk(buf.Bytes())
+		if err != nil {
+			log.Printf("region capture: save failed: %v", err)
+			runtime.WindowShow(a.ctx)
+			a.isWindowHidden = false
+			a.isCapturing = false
+			return
+		}
+		a.spawnEditor(snipPath, rgbaImg, cropRect)
 
-		// Emit cropped image directly - no need for frontend to crop again
-		runtime.EventsEmit(a.ctx, "region:selected", map[string]interface{}{
-			"width":      scaledW,
-			"height":     scaledH,
-			"screenshot": base64.StdEncoding.EncodeToString(buf.Bytes()),
-			"expandable": a.backingExpandable(),
-		})
+		// The main window stays where it was (usually hidden in the tray);
+		// the editor window is the thing that appears.
+		a.isCapturing = false
 	}()
 
 	// Return minimal data (actual selection comes via event)
@@ -996,7 +1029,12 @@ func (a *App) GetLibraryImages() ([]library.LibraryImage, error) {
 // OpenInEditor loads an image file into the editor
 // Security: validates path is within QuickSave folder
 func (a *App) OpenInEditor(imagePath string) (*screenshot.CaptureResult, error) {
-	a.clearBacking() // a file from disk was never cut from the live screen
+	// A file from disk was never cut from the live screen - except in an
+	// editor window, whose own image arrived WITH its backing screen loaded
+	// from the spawn handoff. Clearing here would wipe it just before use.
+	if !a.editMode {
+		a.clearBacking()
+	}
 	// Validate path is within QuickSave folder (prevent directory traversal)
 	folder := a.config.QuickSave.Folder
 	if folder == "" {

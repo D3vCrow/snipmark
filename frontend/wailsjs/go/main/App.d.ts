@@ -12,6 +12,8 @@ export function CaptureDisplay(arg1:number):Promise<screenshot.CaptureResult>;
 
 export function CaptureFullscreen():Promise<screenshot.CaptureResult>;
 
+export function CaptureFullscreenToEditor():Promise<void>;
+
 export function CaptureRegion(arg1:number,arg2:number,arg3:number,arg4:number):Promise<screenshot.CaptureResult>;
 
 export function CaptureWindow(arg1:number):Promise<screenshot.CaptureResult>;
@@ -49,6 +51,8 @@ export function GetGDriveConfig():Promise<config.GDriveConfig>;
 export function GetGDriveStatus():Promise<main.GDriveStatus>;
 
 export function GetHotkeyConfig():Promise<main.HotkeyConfig>;
+
+export function GetLaunchInfo():Promise<main.LaunchInfo>;
 
 export function GetLibraryImages():Promise<Array<library.LibraryImage>>;
 
@@ -95,6 +99,8 @@ export function SaveGDriveConfig(arg1:string):Promise<void>;
 export function SaveGDriveCredentials(arg1:string,arg2:string):Promise<void>;
 
 export function SaveImage(arg1:string,arg2:string):Promise<main.SaveImageResult>;
+
+export function SaveImageToPath(arg1:string,arg2:string):Promise<main.SaveImageResult>;
 
 export function SaveR2Config(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

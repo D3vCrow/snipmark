@@ -10,6 +10,10 @@ export function CaptureFullscreen() {
   return window['go']['main']['App']['CaptureFullscreen']();
 }
 
+export function CaptureFullscreenToEditor() {
+  return window['go']['main']['App']['CaptureFullscreenToEditor']();
+}
+
 export function CaptureRegion(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CaptureRegion'](arg1, arg2, arg3, arg4);
 }
@@ -84,6 +88,10 @@ export function GetGDriveStatus() {
 
 export function GetHotkeyConfig() {
   return window['go']['main']['App']['GetHotkeyConfig']();
+}
+
+export function GetLaunchInfo() {
+  return window['go']['main']['App']['GetLaunchInfo']();
 }
 
 export function GetLibraryImages() {
@@ -176,6 +184,10 @@ export function SaveGDriveCredentials(arg1, arg2) {
 
 export function SaveImage(arg1, arg2) {
   return window['go']['main']['App']['SaveImage'](arg1, arg2);
+}
+
+export function SaveImageToPath(arg1, arg2) {
+  return window['go']['main']['App']['SaveImageToPath'](arg1, arg2);
 }
 
 export function SaveR2Config(arg1, arg2, arg3, arg4) {

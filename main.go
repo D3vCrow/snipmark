@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -18,20 +20,27 @@ var assets embed.FS
 const singleInstanceMutex = "WinShot-SingleInstance-Mutex-7F3A9B2E"
 
 func main() {
-	// Single instance check using Windows mutex
-	mutexName, _ := windows.UTF16PtrFromString(singleInstanceMutex)
-	handle, err := windows.CreateMutex(nil, false, mutexName)
-	if err != nil {
-		// Failed to create mutex - another instance likely running
-		println("WinShot is already running")
-		return
-	}
-	defer windows.CloseHandle(handle)
+	// Editor-window launch? (--edit <image>, see editor_mode.go). Editor
+	// processes skip the single-instance mutex on purpose: one main instance,
+	// any number of editor windows.
+	launch := parseEditorArgs(os.Args[1:])
 
-	// Check if mutex already existed (another instance owns it)
-	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
-		println("WinShot is already running")
-		return
+	if launch == nil {
+		// Single instance check using Windows mutex - main instance only
+		mutexName, _ := windows.UTF16PtrFromString(singleInstanceMutex)
+		handle, err := windows.CreateMutex(nil, false, mutexName)
+		if err != nil {
+			// Failed to create mutex - another instance likely running
+			println("WinShot is already running")
+			return
+		}
+		defer windows.CloseHandle(handle)
+
+		// Check if mutex already existed (another instance owns it)
+		if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+			println("WinShot is already running")
+			return
+		}
 	}
 
 	// Load config to get saved window size and startup settings
@@ -50,19 +59,31 @@ func main() {
 		height = 600
 	}
 
-	// Check if app should start hidden (minimize to tray)
-	startHidden := cfg != nil && cfg.Startup.MinimizeToTray
+	// Check if app should start hidden (minimize to tray). An editor window
+	// is the thing the user just asked for - it never starts hidden.
+	startHidden := launch == nil && cfg != nil && cfg.Startup.MinimizeToTray
 
 	app := NewApp()
+	title := "WinShot"
+	if launch != nil {
+		app.editMode = true
+		app.editPath = launch.imagePath
+		title = "WinShot - " + filepath.Base(launch.imagePath)
+		if launch.hasBacking {
+			// Load before wails.Run: cheap, and GetLaunchInfo can then answer
+			// the frontend's first call with real expandable edges.
+			app.loadBackingFromTemp(launch.backingPath, launch.backingRect)
+		}
+	}
 
-	err = wails.Run(&options.App{
-		Title:            "WinShot",
-		Width:            width,
-		Height:           height,
-		MinWidth:         800,
-		MinHeight:        600,
-		Frameless:        true,
-		StartHidden:      startHidden,
+	err := wails.Run(&options.App{
+		Title:       title,
+		Width:       width,
+		Height:      height,
+		MinWidth:    800,
+		MinHeight:   600,
+		Frameless:   true,
+		StartHidden: startHidden,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
